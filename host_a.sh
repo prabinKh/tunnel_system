@@ -51,9 +51,11 @@ echo "    [2] Shared Folder Only (~/shared_files)"
 echo ""
 PERM_CHOICE="1"
 if [ -t 0 ]; then
-    read -p "  Selection [1/2] (default: 1): " PERM_CHOICE || PERM_CHOICE="1"
+    printf "  Selection [1/2] (default: 1): "
+    read -r PERM_CHOICE || PERM_CHOICE="1"
 elif [ -e /dev/tty ]; then
-    read -p "  Selection [1/2] (default: 1): " PERM_CHOICE </dev/tty || PERM_CHOICE="1"
+    printf "  Selection [1/2] (default: 1): "
+    read -r PERM_CHOICE < /dev/tty || PERM_CHOICE="1"
 fi
 
 if [ "$PERM_CHOICE" = "2" ]; then
@@ -69,9 +71,11 @@ else
             echo "[WARN] macOS Privacy: Full Disk Access is required for ~/Documents"
             OPEN_SET="y"
             if [ -t 0 ]; then
-                read -p "  Open System Settings to enable Full Disk Access for sshd? (y/n) [default: y]: " OPEN_SET || OPEN_SET="y"
+                printf "  Open System Settings to enable Full Disk Access for sshd? (y/n) [default: y]: "
+                read -r OPEN_SET || OPEN_SET="y"
             elif [ -e /dev/tty ]; then
-                read -p "  Open System Settings to enable Full Disk Access for sshd? (y/n) [default: y]: " OPEN_SET </dev/tty || OPEN_SET="y"
+                printf "  Open System Settings to enable Full Disk Access for sshd? (y/n) [default: y]: "
+                read -r OPEN_SET < /dev/tty || OPEN_SET="y"
             fi
             if [ "$OPEN_SET" != "n" ] && [ "$OPEN_SET" != "N" ]; then
                 open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" 2>/dev/null || true
@@ -80,8 +84,6 @@ else
         fi
     fi
 fi
-
-
 
 # 3. Ensure local SSH server is running
 echo "[INFO] Checking local SSH server on port 22..."
@@ -121,17 +123,17 @@ cleanup() {
         kill "$HB_PID" 2>/dev/null || true
     fi
     ssh -i "$KEY_FILE" -p "$VPS_PORT" -o StrictHostKeyChecking=no -o ConnectTimeout=5 "$VPS_USER@$VPS_IP" \
-        "rm -f /home/prabin/tunnel_system/registry/$MACHINE_NAME.json" 2>/dev/null || true
+        "rm -f /home/prabin/tunnel_system/registry/$MACHINE_NAME.json; fuser -k $TUNNEL_PORT/tcp 2>/dev/null || true" 2>/dev/null || true
     exit 0
 }
 trap cleanup SIGINT SIGTERM EXIT
 
-# 7. Register on VPS
+# 7. Register on VPS and free any lingering port forward
 REG_JSON="{\"name\":\"$MACHINE_NAME\",\"tunnel_port\":$TUNNEL_PORT,\"share_root\":\"$SHARE_DIR\",\"username\":\"$USER\",\"os\":\"$OS_TYPE\",\"key_auth\":true,\"registered\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"heartbeat\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
 
 echo "[INFO] Registering machine on VPS (passwordless)..."
 ssh -i "$KEY_FILE" -p "$VPS_PORT" -o StrictHostKeyChecking=no -o ConnectTimeout=10 "$VPS_USER@$VPS_IP" \
-    "mkdir -p /home/prabin/tunnel_system/registry && echo '$REG_JSON' > /home/prabin/tunnel_system/registry/$MACHINE_NAME.json"
+    "mkdir -p /home/prabin/tunnel_system/registry && fuser -k $TUNNEL_PORT/tcp 2>/dev/null || true; echo '$REG_JSON' > /home/prabin/tunnel_system/registry/$MACHINE_NAME.json"
 echo "[OK] Registered as $MACHINE_NAME on VPS registry!"
 
 # Start background heartbeat
