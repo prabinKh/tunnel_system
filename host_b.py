@@ -657,7 +657,7 @@ def browser_session(vps, machine, key_path):
             continue
 
         # Download commands
-        if low in ("download all", "get all", "da", "get *", "download *"):
+        if low in ("download all", "downlaod all", "get all", "da", "get *", "download *"):
             ans = input(f"  Download ALL {len(entries)} items to {local_dl}? (y/n): ").lower()
             if ans == "y":
                 for e in entries:
@@ -665,7 +665,14 @@ def browser_session(vps, machine, key_path):
                     download_item(host_a, sftp, rp, local_dl, is_dir=(e["type"]=="DIR"), is_windows=is_windows)
             continue
 
-        if low.startswith("download ") or low.startswith("get ") or low.startswith("d "):
+        if low in ("download", "downlaod", "dowload", "get", "d"):
+            target_arg = input("  Enter file/folder number or name to download: ").strip()
+            if not target_arg:
+                continue
+            low = f"download {target_arg}"
+            raw = f"download {target_arg}"
+
+        if low.startswith("download ") or low.startswith("downlaod ") or low.startswith("dowload ") or low.startswith("get ") or low.startswith("d "):
             target_arg = raw.split(" ", 1)[1].strip().strip("'\"")
             
             # Check if target is a number index
@@ -685,6 +692,11 @@ def browser_session(vps, machine, key_path):
                 if e["name"].lower() == target_arg.lower():
                     match = e
                     break
+            if not match:
+                for e in entries:
+                    if e["name"].lower().startswith(target_arg.lower()):
+                        match = e
+                        break
             if match:
                 rp = join_remote_path(current_path, match["name"], is_windows)
                 download_item(host_a, sftp, rp, local_dl, is_dir=(match["type"]=="DIR"), is_windows=is_windows)
@@ -693,6 +705,7 @@ def browser_session(vps, machine, key_path):
                 rp = join_remote_path(current_path, target_arg, is_windows)
                 download_item(host_a, sftp, rp, local_dl, is_windows=is_windows)
             continue
+
 
         # CD (change directory)
         if low.startswith("cd "):

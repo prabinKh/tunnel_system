@@ -49,7 +49,13 @@ echo "  Select what you want to share with Host B:"
 echo "    [1] Entire Home Directory (Full access)"
 echo "    [2] Shared Folder Only (~/shared_files)"
 echo ""
-read -p "  Selection [1/2] (default: 1): " PERM_CHOICE
+PERM_CHOICE="1"
+if [ -t 0 ]; then
+    read -p "  Selection [1/2] (default: 1): " PERM_CHOICE || PERM_CHOICE="1"
+elif [ -e /dev/tty ]; then
+    read -p "  Selection [1/2] (default: 1): " PERM_CHOICE </dev/tty || PERM_CHOICE="1"
+fi
+
 if [ "$PERM_CHOICE" = "2" ]; then
     SHARE_DIR="$HOME/shared_files"
     mkdir -p "$SHARE_DIR"
@@ -61,14 +67,20 @@ else
     if [ "$OS_TYPE" = "Darwin" ]; then
         if ! ls "$HOME/Documents" >/dev/null 2>&1; then
             echo "[WARN] macOS Privacy: Full Disk Access is required for ~/Documents"
-            read -p "  Open System Settings to enable Full Disk Access for sshd? (y/n) [default: y]: " OPEN_SET
-            if [ "$OPEN_SET" != "n" ]; then
+            OPEN_SET="y"
+            if [ -t 0 ]; then
+                read -p "  Open System Settings to enable Full Disk Access for sshd? (y/n) [default: y]: " OPEN_SET || OPEN_SET="y"
+            elif [ -e /dev/tty ]; then
+                read -p "  Open System Settings to enable Full Disk Access for sshd? (y/n) [default: y]: " OPEN_SET </dev/tty || OPEN_SET="y"
+            fi
+            if [ "$OPEN_SET" != "n" ] && [ "$OPEN_SET" != "N" ]; then
                 open "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles" 2>/dev/null || true
                 echo "[INFO] System Settings opened. Turn ON for sshd / Terminal."
             fi
         fi
     fi
 fi
+
 
 
 # 3. Ensure local SSH server is running
