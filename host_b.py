@@ -701,6 +701,9 @@ def browser_session(vps, machine, key_path):
             if target in ("..", "0"):
                 history.append(current_path)
                 current_path = get_parent_dir(current_path, is_windows)
+            elif target in ("~", ""):
+                history.append(current_path)
+                current_path = machine.get("share_root", "/")
             elif target.isdigit():
                 idx = int(target) - 1
                 if 0 <= idx < len(entries):
@@ -713,26 +716,45 @@ def browser_session(vps, machine, key_path):
                 else:
                     warn(f"Invalid item number (1–{len(entries)}).")
             else:
-                # Look for matching directory name
+                # 1. Exact match
                 matched_dir = None
                 for e in entries:
                     if e["type"] == "DIR" and e["name"].lower() == target.lower():
                         matched_dir = e["name"]
                         break
-                
+                # 2. Prefix match (e.g. 'Do' -> 'Documents')
+                if not matched_dir:
+                    for e in entries:
+                        if e["type"] == "DIR" and e["name"].lower().startswith(target.lower()):
+                            matched_dir = e["name"]
+                            break
+                # 3. Substring match (e.g. 'doc' -> 'Documents')
+                if not matched_dir:
+                    for e in entries:
+                        if e["type"] == "DIR" and target.lower() in e["name"].lower():
+                            matched_dir = e["name"]
+                            break
+
                 if matched_dir:
                     history.append(current_path)
                     current_path = join_remote_path(current_path, matched_dir, is_windows)
                 else:
-                    # Direct absolute path
-                    history.append(current_path)
-                    current_path = normalize_remote_path(target, is_windows)
+                    # Direct absolute or relative path
+                    if target.startswith("/") or target.startswith("\\") or (len(target) > 1 and target[1] == ":"):
+                        history.append(current_path)
+                        current_path = normalize_remote_path(target, is_windows)
+                    else:
+                        history.append(current_path)
+                        current_path = join_remote_path(current_path, target, is_windows)
 
             entries, error = list_sftp_dir(sftp, current_path)
             if entries is not None:
                 display_listing(entries, current_path, name, os_type)
             else:
                 err(f"Cannot access: {error}")
+                if "Permission denied" in str(error) and os_type == "Darwin":
+                    warn("macOS requires Full Disk Access for Remote Login (SSH) to read ~/Documents or ~/Downloads.")
+                    warn("Go to: System Settings → Privacy & Security → Full Disk Access → Turn ON for sshd / Terminal")
                 if history:
                     current_path = history.pop()
                     entries, _ = list_sftp_dir(sftp, current_path)
@@ -758,6 +780,8 @@ def browser_session(vps, machine, key_path):
                         display_listing(entries, current_path, name, os_type)
                     else:
                         err(f"Cannot enter directory: {error}")
+                        if "Permission denied" in str(error) and os_type == "Darwin":
+                            warn("macOS Privacy Note: System Settings → Privacy & Security → Full Disk Access → Turn ON for sshd")
                         if history: current_path = history.pop()
                 else:
                     rp = join_remote_path(current_path, e["name"], is_windows)
@@ -771,17 +795,22 @@ def browser_session(vps, machine, key_path):
         # Check if user typed a folder name directly (e.g. `shared_files` without cd)
         matched_dir = None
         for e in entries:
-            if e["type"] == "DIR" and e["name"].lower() == raw.lower():
+            if e["type"] == "DIR" and (e["name"].lower() == raw.lower() or e["name"].lower().startswith(raw.lower())):
                 matched_dir = e["name"]
                 break
         if matched_dir:
             history.append(current_path)
             current_path = join_remote_path(current_path, matched_dir, is_windows)
-            entries, _ = list_sftp_dir(sftp, current_path)
-            display_listing(entries, current_path, name, os_type)
+            entries, error = list_sftp_dir(sftp, current_path)
+            if entries is not None:
+                display_listing(entries, current_path, name, os_type)
+            else:
+                err(f"Cannot access folder: {error}")
+                if history: current_path = history.pop()
             continue
 
         warn(f"Unknown command '{raw}'. Type {BOLD}help{R} or {BOLD}ls{R} or {BOLD}cd <folder>{R}")
+
 
     try:
         sftp.close()
