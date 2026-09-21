@@ -1,6 +1,6 @@
 <#
 ==============================================================================
- Host A - Native PowerShell Agent (Zero Python / Zero Pip required)
+ Host A - Native PowerShell Agent (Zero Python / Zero Pip / Zero Passwords)
  Supports: Windows 10 / 11 / Server (with built-in OpenSSH)
 ==============================================================================
 #>
@@ -10,10 +10,19 @@ $ErrorActionPreference = "SilentlyContinue"
 $VPS_IP      = "144.91.72.44"
 $VPS_PORT    = "22"
 $VPS_USER    = "prabin"
-$VPS_PASS    = "Prabin@1234#"
-$MASTER_PUBKEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIByK4+P+33oBAdWKWsYiUAAVcaxDY1NIpfR4Yyvvjh+B vps-tunnel-master"
 $SHARE_DIR   = "$HOME\shared_files"
 $MACHINE_NAME = $env:COMPUTERNAME.Replace(" ", "_")
+
+$MASTER_PUBKEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIByK4+P+33oBAdWKWsYiUAAVcaxDY1NIpfR4Yyvvjh+B vps-tunnel-master"
+$MASTER_PRIVKEY = @"
+-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+QyNTUxOQAAACAciuPj/t96AQHVilrGIlAAFXGsQ2NTSKX0eGMr744fgQAAAJgFEj2nBRI9
+pwAAAAtzc2gtZWQyNTUxOQAAACAciuPj/t96AQHVilrGIlAAFXGsQ2NTSKX0eGMr744fgQ
+AAAEDdxYkNehpMCzn3animpTCtL3svAS4VIBhfVbkjLRlF6hyK4+P+33oBAdWKWsYiUAAV
+caxDY1NIpfR4Yyvvjh+BAAAAEXZwcy10dW5uZWwtbWFzdGVyAQIDBA==
+-----END OPENSSH PRIVATE KEY-----
+"@
 
 # Compute deterministic port from hostname hash (22100 - 22599)
 $bytes = [System.Text.Encoding]::UTF8.GetBytes($MACHINE_NAME)
@@ -22,26 +31,30 @@ $portOffset = [BitConverter]::ToUInt16($hash, 0) % 500
 $TUNNEL_PORT = 22100 + $portOffset
 
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "  Host A - Source Machine Agent (Native Windows PowerShell)" -ForegroundColor Cyan
+Write-Host "  Host A - Source Machine Agent (Windows PowerShell - Passwordless)" -ForegroundColor Cyan
 Write-Host "  Machine: $MACHINE_NAME | Tunnel Port: $TUNNEL_PORT" -ForegroundColor Cyan
 Write-Host "============================================================"
 
-# 1. Create Share Folder
+# 1. Setup local master key file
+$sshDir = "$HOME\.ssh"
+if (!(Test-Path $sshDir)) {
+    New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
+}
+$keyFile = "$sshDir\vps_tunnel_master_key"
+Set-Content -Path $keyFile -Value $MASTER_PRIVKEY
+
+# 2. Create Share Folder
 if (!(Test-Path $SHARE_DIR)) {
     New-Item -ItemType Directory -Path $SHARE_DIR -Force | Out-Null
 }
 Write-Host "[OK] Share directory ready: $SHARE_DIR" -ForegroundColor Green
 
-# 2. Check / Start OpenSSH Server
+# 3. Check / Start OpenSSH Server
 Write-Host "[INFO] Checking OpenSSH server on Windows..." -ForegroundColor Yellow
 Start-Service sshd -ErrorAction SilentlyContinue
 Set-Service -Name sshd -StartupType Automatic -ErrorAction SilentlyContinue
 
-# 3. Add Master Public Key to authorized_keys
-$sshDir = "$HOME\.ssh"
-if (!(Test-Path $sshDir)) {
-    New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
-}
+# 4. Add Master Public Key to authorized_keys
 $authKeys = "$sshDir\authorized_keys"
 if (Test-Path $authKeys) {
     $existing = Get-Content $authKeys -Raw
@@ -52,7 +65,6 @@ if (Test-Path $authKeys) {
     Set-Content -Path $authKeys -Value "$MASTER_PUBKEY`n"
 }
 
-# Also add to administrators_authorized_keys if exists
 $adminAuthKeys = "$env:ProgramData\ssh\administrators_authorized_keys"
 if (Test-Path (Split-Path $adminAuthKeys)) {
     if (Test-Path $adminAuthKeys) {
@@ -66,8 +78,7 @@ if (Test-Path (Split-Path $adminAuthKeys)) {
 }
 Write-Host "[OK] Master public key installed in authorized_keys." -ForegroundColor Green
 
-# 4. Open Reverse SSH Tunnel
-Write-Host "[INFO] Opening Reverse SSH Tunnel to VPS on port $TUNNEL_PORT..." -ForegroundColor Green
-Write-Host "[INFO] Use password: $VPS_PASS if prompted." -ForegroundColor Yellow
+# 5. Open Reverse SSH Tunnel
+Write-Host "[INFO] Opening Reverse SSH Tunnel to VPS on port $TUNNEL_PORT (Passwordless)..." -ForegroundColor Green
 
-ssh -N -p $VPS_PORT -R "$($TUNNEL_PORT):localhost:22" -o StrictHostKeyChecking=no -o ServerAliveInterval=20 "$VPS_USER@$VPS_IP"
+ssh -N -i "$keyFile" -p $VPS_PORT -R "$($TUNNEL_PORT):localhost:22" -o StrictHostKeyChecking=no -o ServerAliveInterval=20 "$VPS_USER@$VPS_IP"
