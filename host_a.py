@@ -154,12 +154,12 @@ def get_current_username():
     except Exception:
         return os.environ.get("USER") or os.environ.get("USERNAME") or "user"
 
-# ─── STEP 1: Grant permissions ────────────────────────────────
+# ─── STEP 1: Grant & configure permissions ───────────────────
 def grant_permissions(path):
     if not os.path.exists(path):
         os.makedirs(path, exist_ok=True)
         ok(f"Created share directory: {path}")
-    info(f"Setting permissions on share folder: {path}")
+    info(f"Setting permissions on folder: {path}")
     
     sys_name = platform.system()
     if sys_name in ("Darwin", "Linux"):
@@ -175,12 +175,59 @@ def grant_permissions(path):
                         stat.S_IRGRP | stat.S_IROTH)
             os.chmod(path, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP |
                             stat.S_IROTH | stat.S_IXOTH)
-            ok(f"Permissions set on: {path}")
+            ok(f"Permissions configured on: {path}")
         except Exception as e:
             warn(f"Permission warning: {e}")
     else:
         # Windows
         ok(f"Directory ready on Windows: {path}")
+
+def configure_permissions():
+    """Ask user for access permissions: Full Access or Dedicated shared_files."""
+    print(f"  {YEL}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{R}")
+    print(f"  {BOLD}🔐 ACCESS PERMISSION SELECTION{R}")
+    print(f"  {YEL}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━{R}")
+    print(f"  Choose what you want to share with Host B:")
+    print(f"    {GRN}[1]{R} {BOLD}Entire Home Folder{R}  (Full access to all project folders)")
+    print(f"    {CYN}[2]{R} {BOLD}Dedicated Folder{R}    (~/shared_files only)")
+    print(f"    {BLU}[3]{R} {BOLD}Custom Path{R}")
+    print()
+    try:
+        ans = input(f"  Selection [1/2/3] (default: 1): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        ans = "1"
+    
+    if ans == "2":
+        path = os.path.expanduser("~/shared_files")
+        grant_permissions(path)
+        ok(f"Restricted access set to: {path}")
+        return path
+    elif ans == "3":
+        custom = input("  Enter path: ").strip()
+        path = os.path.abspath(os.path.expanduser(custom))
+        grant_permissions(path)
+        return path
+    else:
+        path = os.path.expanduser("~")
+        ok(f"Full Home Folder selected: {path}")
+        
+        # Check macOS Full Disk Access
+        if platform.system() == "Darwin":
+            test_doc = os.path.expanduser("~/Documents")
+            try:
+                os.listdir(test_doc)
+                ok("macOS Full Disk Access verified ✓")
+            except Exception:
+                warn("macOS Privacy Note: ~/Documents and ~/Downloads require Full Disk Access.")
+                try:
+                    ask = input(f"  Open macOS Settings to allow Full Disk Access for sshd? (y/n) [default: y]: ").lower().strip()
+                    if ask in ("y", "yes", ""):
+                        subprocess.run(["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"])
+                        info("Opened System Settings. Toggle ON for sshd / Terminal.")
+                except Exception:
+                    pass
+        return path
+
 
 # ─── STEP 2: Check & auto-enable local SSH daemon ─────────────
 def is_ssh_port_open():
@@ -600,25 +647,27 @@ def main():
     # Resolve identity
     machine_name = get_machine_name(args.name or CONFIG["MACHINE_NAME"])
     tunnel_port  = compute_tunnel_port(machine_name)
-    share_root   = os.path.abspath(os.path.expanduser(args.share or CONFIG["SHARE_ROOT"]))
-    CONFIG["SHARE_ROOT"] = share_root
     username     = get_current_username()
 
     print(f"  {CYN}Machine Name   :{R} {BOLD}{machine_name}{R}")
     print(f"  {CYN}Detected OS    :{R} {platform.system()} ({platform.machine()})")
     print(f"  {CYN}Tunnel Port    :{R} {BOLD}{tunnel_port}{R}  (auto-derived from name)")
-    print(f"  {CYN}Share Directory:{R} {share_root}")
     print(f"  {CYN}Username       :{R} {username}")
     print(f"  {CYN}VPS            :{R} {CONFIG['VPS_USER']}@{CONFIG['VPS_IP']}")
     sep()
     print()
 
-    # ── 1. Grant permissions ───────────────────────────────────
-    if CONFIG["AUTO_GRANT_PERMISSIONS"]:
+    # ── 1. Configure permissions interactively ────────────────
+    if args.share:
+        share_root = os.path.abspath(os.path.expanduser(args.share))
         grant_permissions(share_root)
-        print()
+    else:
+        share_root = configure_permissions()
+    CONFIG["SHARE_ROOT"] = share_root
+    print(f"\n  {CYN}Active Share Path:{R} {BOLD}{share_root}{R}\n")
 
     # ── 2. Check local SSH daemon ──────────────────────────────
+
     if not check_local_ssh():
         err("Please enable SSH on this machine and re-run host_a.py.")
         sys.exit(1)
