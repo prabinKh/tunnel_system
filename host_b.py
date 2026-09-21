@@ -917,14 +917,23 @@ def main():
 
     except paramiko.AuthenticationException:
         err("VPS authentication failed. Check credentials in CONFIG.")
+    except (KeyboardInterrupt, EOFError):
+        print(f"\n{GRN}[OK] Exiting cleanly... Goodbye!{R}")
     except Exception as e:
         err(f"Error: {e}")
-        import traceback; traceback.print_exc()
     finally:
         if vps:
-            vps.close()
-        info("Session finished. Goodbye.")
+            try:
+                vps.close()
+            except Exception:
+                pass
+        print(f"{DIM}[INFO] Disconnected. Goodbye.{R}")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (KeyboardInterrupt, EOFError):
+        print("\n[OK] Goodbye!")
+        sys.exit(0)
+
