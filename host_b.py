@@ -226,6 +226,10 @@ def fetch_registry(vps):
     raw = vps_run(vps, f"ls {reg_dir}/*.json 2>/dev/null || true")
     if not raw:
         return []
+    
+    # Check currently listening tunnel ports directly on VPS
+    open_ports_raw = vps_run(vps, "ss -tlnH 2>/dev/null || netstat -tlpn 2>/dev/null || true")
+    
     machines = []
     for fpath in raw.splitlines():
         if not fpath.strip().endswith(".json"):
@@ -235,19 +239,23 @@ def fetch_registry(vps):
             continue
         try:
             m = json.loads(content)
+            port_str = f":{m.get('tunnel_port', -1)}"
+            port_is_open = (port_str in open_ports_raw)
+
             try:
                 hb_t = time.mktime(time.strptime(
                     m.get("heartbeat",""), "%Y-%m-%dT%H:%M:%SZ"))
                 age = time.time() - hb_t
-                m["online"] = age < 90
-                m["age_s"]  = int(age)
+                m["online"] = port_is_open or (age < 120)
+                m["age_s"]  = int(age) if age >= 0 else 0
             except Exception:
-                m["online"] = True
+                m["online"] = port_is_open
                 m["age_s"]  = 0
             machines.append(m)
         except json.JSONDecodeError:
             pass
     return sorted(machines, key=lambda x: x.get("name",""))
+
 
 
 def display_machine_list(machines):
@@ -668,7 +676,7 @@ def machine_list_loop(vps, key_path):
 
         if raw in ("q", "quit", "exit"):
             break
-        if raw in ("r", "refresh", ""):
+        if raw in ("r", "refresh", "ls", "list", "status", ""):
             continue
 
         if raw.isdigit():
@@ -683,7 +691,8 @@ def machine_list_loop(vps, key_path):
             else:
                 warn(f"Invalid machine number (1–{len(machines)}).")
         else:
-            warn(f"Unknown command '{raw}'.")
+            warn(f"Unknown command '{raw}'. Type the number (e.g. 1) to connect, 'r' to refresh, or 'q' to quit.")
+
 
 
 # ═════════════════════════════════════════════════════════════

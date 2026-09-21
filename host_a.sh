@@ -68,16 +68,29 @@ if ! grep -q "$MASTER_PUBKEY" "$AUTH_KEYS" 2>/dev/null; then
     echo "[OK] VPS Master key added to authorized_keys (Passwordless access ready)."
 fi
 
-# 5. Cleanup on exit
+# 5. Heartbeat loop (runs in background)
+HB_PID=""
+start_heartbeat() {
+    while true; do
+        sleep 25
+        ssh -i "$KEY_FILE" -p "$VPS_PORT" -o StrictHostKeyChecking=no -o ConnectTimeout=5 "$VPS_USER@$VPS_IP" \
+            "python3 -c \"import json, time; p='/home/prabin/tunnel_system/registry/$MACHINE_NAME.json'; d=json.load(open(p)); d['heartbeat']=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()); json.dump(d, open(p,'w'))\"" 2>/dev/null || true
+    done
+}
+
+# 6. Cleanup on exit
 cleanup() {
     echo -e "\n[INFO] Disconnecting and unregistering..."
+    if [ -n "$HB_PID" ]; then
+        kill "$HB_PID" 2>/dev/null || true
+    fi
     ssh -i "$KEY_FILE" -p "$VPS_PORT" -o StrictHostKeyChecking=no -o ConnectTimeout=5 "$VPS_USER@$VPS_IP" \
         "rm -f /home/prabin/tunnel_system/registry/$MACHINE_NAME.json" 2>/dev/null || true
     exit 0
 }
 trap cleanup SIGINT SIGTERM EXIT
 
-# 6. Register on VPS
+# 7. Register on VPS
 REG_JSON="{\"name\":\"$MACHINE_NAME\",\"tunnel_port\":$TUNNEL_PORT,\"share_root\":\"$SHARE_DIR\",\"username\":\"$USER\",\"os\":\"$OS_TYPE\",\"key_auth\":true,\"registered\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"heartbeat\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
 
 echo "[INFO] Registering machine on VPS (passwordless)..."
@@ -85,7 +98,11 @@ ssh -i "$KEY_FILE" -p "$VPS_PORT" -o StrictHostKeyChecking=no -o ConnectTimeout=
     "mkdir -p /home/prabin/tunnel_system/registry && echo '$REG_JSON' > /home/prabin/tunnel_system/registry/$MACHINE_NAME.json"
 echo "[OK] Registered as $MACHINE_NAME on VPS registry!"
 
-# 7. Open Reverse SSH Tunnel
+# Start background heartbeat
+start_heartbeat &
+HB_PID=$!
+
+# 8. Open Reverse SSH Tunnel
 echo "[OK] Opening Reverse SSH Tunnel to VPS on port $TUNNEL_PORT (Passwordless)..."
 ssh -N \
     -i "$KEY_FILE" \
