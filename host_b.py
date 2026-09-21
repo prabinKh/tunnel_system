@@ -3,29 +3,23 @@
 """
 ╔══════════════════════════════════════════════════════════════╗
 ║              HOST B  —  MAIN CONTROLLER                      ║
-║   Run on YOUR machine to browse, execute commands & download ║
-║   from any Host A machine (Windows, macOS, Linux) via VPS.   ║
+║   Universal Controller with Intuitive Terminal Commands      ║
 ╠══════════════════════════════════════════════════════════════╣
 ║  Just run:  python3 host_b.py                                ║
 ║  Or:        ./host_b.py  (if executable)                     ║
 ║                                                              ║
-║  Features:                                                   ║
-║    • Auto-discovers all online machines in VPS registry      ║
-║    • Passwordless instant connection via embedded master key ║
-║    • Universal SFTP file browser (Windows / Mac / Linux)     ║
-║    • Remote Command Execution on any target machine (exec)   ║
-║    • Single-file and bulk folder downloads                   ║
-╠══════════════════════════════════════════════════════════════╣
-║  COMMANDS IN BROWSER:                                        ║
-║    <number>       → Open folder (or download if file)        ║
-║    0 / ..         → Go up one folder level                   ║
-║    d <num>        → Download specific file or folder         ║
-║    da             → Download ALL items in current directory  ║
-║    cd <path>      → Jump to absolute path                    ║
-║    exec <command> → Execute a shell command on that machine  ║
-║    info           → Show machine specifications              ║
-║    machines / b   → Return to machine selection list         ║
-║    q              → Quit                                     ║
+║  USER-FRIENDLY COMMANDS:                                     ║
+║    ls / dir            → List all files and folders          ║
+║    cd <folder_name>    → Enter directory by name or number   ║
+║    cd .. / cd 0        → Go up one directory level           ║
+║    pwd                 → Print current remote path           ║
+║    download <filename> → Download file or folder to local PC ║
+║    download all / da   → Download entire folder contents     ║
+║    cat <filename>      → View remote file contents in console║
+║    exec <command>      → Run any shell command on that PC    ║
+║    mkdir <folder>      → Create folder on remote machine     ║
+║    rm <file>           → Delete remote file                  ║
+║    back / b / q        → Return to machine list / quit       ║
 ╚══════════════════════════════════════════════════════════════╝
 """
 
@@ -122,7 +116,7 @@ def info(m):  print(f"{BLU}[INFO]{R}  {m}")
 def ok(m):    print(f"{GRN}[ OK ]{R}  {m}")
 def warn(m):  print(f"{YEL}[WARN]{R}  {m}")
 def err(m):   print(f"{RED}[ERR ]{R}  {m}")
-def sep(ch="─", w=70): print(ch * w)
+def sep(ch="─", w=72): print(ch * w)
 def title(m): print(f"\n{BOLD}{CYN}{m}{R}")
 
 BANNER = f"""
@@ -227,7 +221,7 @@ def fetch_registry(vps):
     if not raw:
         return []
     
-    # Check currently listening tunnel ports directly on VPS
+    # Check open tunnel ports directly on VPS
     open_ports_raw = vps_run(vps, "ss -tlnH 2>/dev/null || netstat -tlpn 2>/dev/null || true")
     
     machines = []
@@ -257,13 +251,12 @@ def fetch_registry(vps):
     return sorted(machines, key=lambda x: x.get("name",""))
 
 
-
 def display_machine_list(machines):
     title("  CONNECTED MACHINES (WINDOWS / MAC / LINUX)")
     sep("═")
     if not machines:
         print(f"  {YEL}No machines registered yet.{R}")
-        print(f"  {DIM}Run host_a.py on your target machines first.{R}")
+        print(f"  {DIM}Run host_a.sh (or host_a.py / host_a.ps1) on source machines first.{R}")
         sep("═")
         return
     print(f"  {BOLD}{'#':<4}  {'STATUS':<12}  {'OS':<10}  {'NAME':<24}  {'PORT':<6}  AGE{R}")
@@ -279,6 +272,7 @@ def display_machine_list(machines):
         print(f"  {str(i):<4}  {status}  {CYN}{os_type:<10}{R}  "
               f"{BOLD}{name:<24}{R}  {BLU}{port:<6}{R}  {DIM}{age_str}{R}")
     sep("═")
+    print(f"  {DIM}Type a machine number (e.g. 1) or machine name to connect.{R}\n")
 
 
 # ═════════════════════════════════════════════════════════════
@@ -292,7 +286,7 @@ def connect_to_machine(vps, machine, key_path):
     key_auth    = machine.get("key_auth", False)
     os_name     = machine.get("os", "")
 
-    info(f"Connecting to '{name}' ({os_name}) via reverse tunnel port {tunnel_port} ...")
+    info(f"Connecting to '{name}' ({os_name}) via tunnel port {tunnel_port} ...")
 
     try:
         channel = vps.get_transport().open_channel(
@@ -302,7 +296,7 @@ def connect_to_machine(vps, machine, key_path):
         )
     except Exception as e:
         err(f"Cannot open tunnel channel to port {tunnel_port}: {e}")
-        err("Is host_a.py running on that machine?")
+        err("Is Host A agent running on that machine?")
         return None
 
     if not username:
@@ -326,9 +320,6 @@ def connect_to_machine(vps, machine, key_path):
             host_a.connect(**kw)
             ok(f"Connected to '{name}'  {GRN}(passwordless — master key ✓){R}")
             return host_a
-        except paramiko.AuthenticationException:
-            warn("Key auth was rejected by host. Falling back to password...")
-            del kw["key_filename"]
         except Exception as e:
             warn(f"Key attempt failed ({e}). Falling back to password...")
             if "key_filename" in kw:
@@ -363,7 +354,7 @@ def fmt_size(n):
 def normalize_remote_path(p, is_windows=False):
     if not p:
         return "/"
-    p = p.strip()
+    p = p.strip().strip("'\"")
     if is_windows:
         return p.replace("/", "\\")
     return p.replace("\\", "/")
@@ -410,7 +401,7 @@ def display_listing(entries, current_path, machine_name, os_type):
     sep()
     print(f"  {BOLD}{'#':<5} {'TYPE':<7} {'SIZE':>9}   NAME{R}")
     sep()
-    print(f"  {'0':<5} {YEL}[..]   {R}{'':>9}   {YEL}.. (go up){R}")
+    print(f"  {'0':<5} {YEL}[..]   {R}{'':>9}   {YEL}.. (go up parent folder){R}")
     for i, e in enumerate(entries, 1):
         if e["type"] == "DIR":
             col, tag = BLU, "[DIR]  "
@@ -420,7 +411,7 @@ def display_listing(entries, current_path, machine_name, os_type):
             col, tag = R, "[FILE] "
         print(f"  {str(i):<5} {col}{tag}{R} {fmt_size(e['size'])}   {col}{e['name']}{R}")
     sep()
-    print(f"  {DIM}{len(entries)} items in folder{R}")
+    print(f"  {DIM}{len(entries)} items  |  cd <name/num>  |  download <name/num>  |  exec <cmd>{R}")
 
 
 # ─── Remote command execution ─────────────────────────────────
@@ -439,6 +430,21 @@ def execute_remote_command(client, command, os_type):
         print(f"\n{DIM}[Exit code: {rc}]{R}")
     except Exception as e:
         err(f"Execution failed: {e}")
+
+# ─── Remote file view (cat) ───────────────────────────────────
+def view_remote_file(sftp, remote_path, max_lines=100):
+    info(f"Reading: {remote_path}")
+    print(f"{DIM}{'─'*60}{R}")
+    try:
+        with sftp.file(remote_path, "r") as f:
+            for i, line in enumerate(f):
+                if i >= max_lines:
+                    print(f"\n{YEL}... (output truncated after {max_lines} lines) ...{R}")
+                    break
+                print(line.rstrip("\r\n"))
+    except Exception as e:
+        err(f"Could not read file: {e}")
+    print(f"{DIM}{'─'*60}{R}")
 
 
 # ─── File & Folder Downloads ──────────────────────────────────
@@ -492,12 +498,28 @@ def download_item(host_a, sftp, remote_path, local_dir, is_dir=False, is_windows
                 scp.get(remote_path, local_path)
             ok(f"Saved: {local_path}")
         except Exception:
-            # Fallback to SFTP get
             try:
                 sftp.get(remote_path, local_path)
                 ok(f"Saved (via SFTP): {local_path}")
             except Exception as e:
                 err(f"Download error: {e}")
+
+
+def show_browser_help():
+    print(f"\n  {BOLD}{GRN}COMMAND REFERENCE:{R}")
+    print(f"  {CYN}ls / dir{R}                 → List files in current folder")
+    print(f"  {CYN}cd <folder_name / num>{R}   → Enter folder by name (e.g. cd Documents) or number (e.g. cd 2)")
+    print(f"  {CYN}cd .. / cd 0{R}             → Go up to parent folder")
+    print(f"  {CYN}pwd{R}                      → Show current remote path")
+    print(f"  {CYN}download <file/num>{R}      → Download file or folder by name or number")
+    print(f"  {CYN}download all / da{R}        → Download everything in current folder")
+    print(f"  {CYN}cat <file>{R}               → View remote text file contents")
+    print(f"  {CYN}exec <command>{R}           → Execute any shell command on remote machine")
+    print(f"  {CYN}mkdir <folder>{R}           → Create folder on remote machine")
+    print(f"  {CYN}rm <file>{R}                → Delete remote file")
+    print(f"  {CYN}info{R}                     → Show machine specs and IP")
+    print(f"  {CYN}b / back / machines{R}      → Return to machine selection menu")
+    print(f"  {CYN}q / quit / exit{R}          → Disconnect\n")
 
 
 # ═════════════════════════════════════════════════════════════
@@ -537,36 +559,11 @@ def browser_session(vps, machine, key_path):
             entries = []
 
     history = []
-
-    print(f"\n  {BOLD}{GRN}COMMAND CHEATSHEET:{R}")
-    print(f"  {CYN}<number>{R}       → Open folder or download file")
-    print(f"  {CYN}0 / ..{R}         → Go up one level")
-    print(f"  {CYN}d <num>{R}        → Download item by number")
-    print(f"  {CYN}da{R}             → Download entire current directory")
-    print(f"  {CYN}cd <path>{R}      → Navigate to exact path")
-    print(f"  {CYN}exec <cmd>{R}     → Execute terminal command on remote machine")
-    print(f"  {CYN}info{R}           → Show machine info")
-    print(f"  {CYN}b / machines{R}   → Back to machines list")
-    print(f"  {CYN}q{R}              → Disconnect\n")
+    display_listing(entries, current_path, name, os_type)
 
     while True:
-        entries, error = list_sftp_dir(sftp, current_path)
-        if entries is None:
-            err(f"Cannot access directory: {error}")
-            if history:
-                current_path = history.pop()
-                continue
-            else:
-                current_path = "C:\\" if is_windows else "/"
-                entries, _ = list_sftp_dir(sftp, current_path)
-                if entries is None:
-                    break
-
-        display_listing(entries, current_path, name, os_type)
-        print()
-
         try:
-            raw = input(f"  {CYN}[{name}:{os_type}]{R}> ").strip()
+            raw = input(f"\n  {CYN}[{name}:{os_type}] {BOLD}{current_path}{R}\n  {GRN}> {R}").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             break
@@ -575,12 +572,27 @@ def browser_session(vps, machine, key_path):
             continue
         low = raw.lower()
 
+        # Navigation & exit
         if low in ("q", "quit", "exit"):
             break
         if low in ("b", "back", "machines"):
             break
+        if low in ("help", "?"):
+            show_browser_help()
+            continue
+        if low in ("clear", "cls"):
+            os.system("clear" if os.name != "nt" else "cls")
+            display_listing(entries, current_path, name, os_type)
+            continue
         if low == "pwd":
-            print(f"  {current_path}")
+            print(f"  {BOLD}{current_path}{R}")
+            continue
+        if low in ("ls", "dir", "ll", "list"):
+            entries, error = list_sftp_dir(sftp, current_path)
+            if entries is not None:
+                display_listing(entries, current_path, name, os_type)
+            else:
+                err(f"Cannot list: {error}")
             continue
         if low == "info":
             print()
@@ -588,40 +600,152 @@ def browser_session(vps, machine, key_path):
                 print(f"    {CYN}{k:<15}{R} {v}")
             print()
             continue
-        if low.startswith("exec ") or low.startswith("sh "):
-            cmd_to_run = raw.split(" ", 1)[1].strip()
-            execute_remote_command(host_a, cmd_to_run, os_type)
-            input(f"\n  Press {BOLD}Enter{R} to return to file browser... ")
+
+        # Remote Command Execution
+        if low.startswith("exec ") or low.startswith("sh ") or low.startswith("!"):
+            cmd_to_run = raw.split(" ", 1)[1] if not raw.startswith("!") else raw[1:]
+            execute_remote_command(host_a, cmd_to_run.strip(), os_type)
             continue
-        if low.startswith("cd "):
-            target = raw[3:].strip()
-            history.append(current_path)
-            current_path = normalize_remote_path(target, is_windows)
+
+        # View text file (cat)
+        if low.startswith("cat ") or low.startswith("view ") or low.startswith("read "):
+            fname = raw.split(" ", 1)[1].strip().strip("'\"")
+            # Check by number or by filename
+            if fname.isdigit() and 1 <= int(fname) <= len(entries):
+                target_name = entries[int(fname)-1]["name"]
+            else:
+                target_name = fname
+            rp = join_remote_path(current_path, target_name, is_windows)
+            view_remote_file(sftp, rp)
             continue
-        if raw in ("0", ".."):
-            history.append(current_path)
-            current_path = get_parent_dir(current_path, is_windows)
+
+        # Mkdir
+        if low.startswith("mkdir "):
+            new_dir = raw.split(" ", 1)[1].strip()
+            rp = join_remote_path(current_path, new_dir, is_windows)
+            try:
+                sftp.mkdir(rp)
+                ok(f"Created folder: {new_dir}")
+                entries, _ = list_sftp_dir(sftp, current_path)
+                display_listing(entries, current_path, name, os_type)
+            except Exception as e:
+                err(f"mkdir failed: {e}")
             continue
-        if low == "da":
+
+        # Rm (delete)
+        if low.startswith("rm ") or low.startswith("del "):
+            target = raw.split(" ", 1)[1].strip()
+            if target.isdigit() and 1 <= int(target) <= len(entries):
+                t_entry = entries[int(target)-1]
+                target = t_entry["name"]
+                is_d = (t_entry["type"] == "DIR")
+            else:
+                is_d = False
+            rp = join_remote_path(current_path, target, is_windows)
+            ans = input(f"  Are you sure you want to delete '{target}'? (y/n): ").lower()
+            if ans == "y":
+                try:
+                    if is_d:
+                        sftp.rmdir(rp)
+                    else:
+                        sftp.remove(rp)
+                    ok(f"Deleted: {target}")
+                    entries, _ = list_sftp_dir(sftp, current_path)
+                    display_listing(entries, current_path, name, os_type)
+                except Exception as e:
+                    err(f"Delete failed: {e}")
+            continue
+
+        # Download commands
+        if low in ("download all", "get all", "da", "get *", "download *"):
             ans = input(f"  Download ALL {len(entries)} items to {local_dl}? (y/n): ").lower()
             if ans == "y":
                 for e in entries:
                     rp = join_remote_path(current_path, e["name"], is_windows)
                     download_item(host_a, sftp, rp, local_dl, is_dir=(e["type"]=="DIR"), is_windows=is_windows)
             continue
-        if low.startswith("d "):
-            parts = raw.split()
-            if len(parts) == 2 and parts[1].isdigit():
-                idx = int(parts[1]) - 1
+
+        if low.startswith("download ") or low.startswith("get ") or low.startswith("d "):
+            target_arg = raw.split(" ", 1)[1].strip().strip("'\"")
+            
+            # Check if target is a number index
+            if target_arg.isdigit():
+                idx = int(target_arg) - 1
                 if 0 <= idx < len(entries):
-                    e  = entries[idx]
+                    e = entries[idx]
                     rp = join_remote_path(current_path, e["name"], is_windows)
                     download_item(host_a, sftp, rp, local_dl, is_dir=(e["type"]=="DIR"), is_windows=is_windows)
                 else:
                     warn(f"Invalid item number (1–{len(entries)}).")
+                continue
+            
+            # Check by filename match
+            match = None
+            for e in entries:
+                if e["name"].lower() == target_arg.lower():
+                    match = e
+                    break
+            if match:
+                rp = join_remote_path(current_path, match["name"], is_windows)
+                download_item(host_a, sftp, rp, local_dl, is_dir=(match["type"]=="DIR"), is_windows=is_windows)
             else:
-                warn("Usage: d <number>  (e.g., d 2)")
+                # Direct download of path
+                rp = join_remote_path(current_path, target_arg, is_windows)
+                download_item(host_a, sftp, rp, local_dl, is_windows=is_windows)
             continue
+
+        # CD (change directory)
+        if low.startswith("cd "):
+            target = raw[3:].strip().strip("'\"")
+            
+            if target in ("..", "0"):
+                history.append(current_path)
+                current_path = get_parent_dir(current_path, is_windows)
+            elif target.isdigit():
+                idx = int(target) - 1
+                if 0 <= idx < len(entries):
+                    e = entries[idx]
+                    if e["type"] == "DIR":
+                        history.append(current_path)
+                        current_path = join_remote_path(current_path, e["name"], is_windows)
+                    else:
+                        warn(f"'{e['name']}' is a file, not a directory.")
+                else:
+                    warn(f"Invalid item number (1–{len(entries)}).")
+            else:
+                # Look for matching directory name
+                matched_dir = None
+                for e in entries:
+                    if e["type"] == "DIR" and e["name"].lower() == target.lower():
+                        matched_dir = e["name"]
+                        break
+                
+                if matched_dir:
+                    history.append(current_path)
+                    current_path = join_remote_path(current_path, matched_dir, is_windows)
+                else:
+                    # Direct absolute path
+                    history.append(current_path)
+                    current_path = normalize_remote_path(target, is_windows)
+
+            entries, error = list_sftp_dir(sftp, current_path)
+            if entries is not None:
+                display_listing(entries, current_path, name, os_type)
+            else:
+                err(f"Cannot access: {error}")
+                if history:
+                    current_path = history.pop()
+                    entries, _ = list_sftp_dir(sftp, current_path)
+            continue
+
+        if raw in ("0", ".."):
+            history.append(current_path)
+            current_path = get_parent_dir(current_path, is_windows)
+            entries, _ = list_sftp_dir(sftp, current_path)
+            display_listing(entries, current_path, name, os_type)
+            continue
+
+        # Single number shortcut (open folder or download file)
         if raw.isdigit():
             idx = int(raw) - 1
             if 0 <= idx < len(entries):
@@ -629,8 +753,14 @@ def browser_session(vps, machine, key_path):
                 if e["type"] == "DIR":
                     history.append(current_path)
                     current_path = join_remote_path(current_path, e["name"], is_windows)
+                    entries, error = list_sftp_dir(sftp, current_path)
+                    if entries is not None:
+                        display_listing(entries, current_path, name, os_type)
+                    else:
+                        err(f"Cannot enter directory: {error}")
+                        if history: current_path = history.pop()
                 else:
-                    rp  = join_remote_path(current_path, e["name"], is_windows)
+                    rp = join_remote_path(current_path, e["name"], is_windows)
                     ans = input(f"  '{e['name']}' is a file ({fmt_size(e['size'])}). Download? (y/n): ").lower()
                     if ans == "y":
                         download_item(host_a, sftp, rp, local_dl, is_windows=is_windows)
@@ -638,7 +768,20 @@ def browser_session(vps, machine, key_path):
                 warn(f"Invalid item number (1–{len(entries)}).")
             continue
 
-        warn(f"Unknown command '{raw}'. Type 'b' to go back, 'q' to quit, or 'exec <cmd>' to run commands.")
+        # Check if user typed a folder name directly (e.g. `shared_files` without cd)
+        matched_dir = None
+        for e in entries:
+            if e["type"] == "DIR" and e["name"].lower() == raw.lower():
+                matched_dir = e["name"]
+                break
+        if matched_dir:
+            history.append(current_path)
+            current_path = join_remote_path(current_path, matched_dir, is_windows)
+            entries, _ = list_sftp_dir(sftp, current_path)
+            display_listing(entries, current_path, name, os_type)
+            continue
+
+        warn(f"Unknown command '{raw}'. Type {BOLD}help{R} or {BOLD}ls{R} or {BOLD}cd <folder>{R}")
 
     try:
         sftp.close()
@@ -656,7 +799,7 @@ def machine_list_loop(vps, key_path):
         display_machine_list(machines)
 
         if not machines:
-            print(f"\n  {DIM}Press Enter to refresh, or 'q' to quit.{R}")
+            print(f"  {DIM}Press Enter or 'r' to refresh, or 'q' to quit.{R}")
             try:
                 raw = input(f"  {CYN}>{R} ").strip().lower()
             except (EOFError, KeyboardInterrupt):
@@ -666,33 +809,45 @@ def machine_list_loop(vps, key_path):
                 break
             continue
 
-        print(f"\n  {BOLD}Select:{R} Enter {GRN}number{R} to connect  "
-              f"  {GRN}r{R}=refresh  {GRN}q{R}=quit\n")
         try:
-            raw = input(f"  {CYN}>{R} ").strip().lower()
+            raw = input(f"  {CYN}Select Machine (# or name) >{R} ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             break
 
-        if raw in ("q", "quit", "exit"):
+        if not raw:
+            continue
+        low = raw.lower()
+
+        if low in ("q", "quit", "exit"):
             break
-        if raw in ("r", "refresh", "ls", "list", "status", ""):
+        if low in ("r", "refresh", "ls", "list", "status", "machines"):
             continue
 
+        # Support "connect <name/num>" or "cd <name/num>"
+        if low.startswith("connect ") or low.startswith("cd "):
+            raw = raw.split(" ", 1)[1].strip()
+
+        # Connect by number
         if raw.isdigit():
             idx = int(raw) - 1
             if 0 <= idx < len(machines):
                 machine = machines[idx]
-                if not machine.get("online"):
-                    ans = input(f"  '{machine['name']}' appears offline. Try anyway? (y/n): ").lower()
-                    if ans != "y":
-                        continue
                 browser_session(vps, machine, key_path)
             else:
-                warn(f"Invalid machine number (1–{len(machines)}).")
-        else:
-            warn(f"Unknown command '{raw}'. Type the number (e.g. 1) to connect, 'r' to refresh, or 'q' to quit.")
+                warn(f"Invalid machine number. Choose 1 to {len(machines)}.")
+            continue
 
+        # Connect by machine name
+        matched = None
+        for m in machines:
+            if m.get("name", "").lower() == raw.lower():
+                matched = m
+                break
+        if matched:
+            browser_session(vps, matched, key_path)
+        else:
+            warn(f"Machine '{raw}' not found. Type a number (e.g. 1) or 'r' to refresh.")
 
 
 # ═════════════════════════════════════════════════════════════
